@@ -35,7 +35,7 @@ class EdiromQrCodeScanner extends HTMLElement {
     // -------------------------------------------------------------------------
 
     static get observedAttributes() {
-        return ["regex"];
+        return ["regex", "aspect-ratio"];
     }
 
     connectedCallback() {
@@ -67,6 +67,19 @@ class EdiromQrCodeScanner extends HTMLElement {
             this.setAttribute("regex", v);
         } else {
             this.removeAttribute("regex");
+        }
+    }
+
+    get aspectRatio() {
+        const val = parseFloat(this.getAttribute("aspect-ratio"));
+        return isNaN(val) ? 0.75 : val; // default: 3:4 portrait
+    }
+
+    set aspectRatio(v) {
+        if (v != null) {
+            this.setAttribute("aspect-ratio", v);
+        } else {
+            this.removeAttribute("aspect-ratio");
         }
     }
 
@@ -116,7 +129,8 @@ class EdiromQrCodeScanner extends HTMLElement {
                 return this._html5QrCode.start(
                     cameraId,
                     {
-                        fps: 20,
+                        fps: 30,
+                        aspectRatio: this.aspectRatio,
                         videoConstraints: videoConstraints,
                     },
                     (decodedText) => {
