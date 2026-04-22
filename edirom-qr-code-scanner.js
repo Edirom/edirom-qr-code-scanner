@@ -28,6 +28,9 @@ class EdiromQrCodeScanner extends HTMLElement {
 
         // The div that serves as the camera feed mount point for html5-qrcode
         this._readerDiv = null;
+
+        // Promise for an in-flight start operation to avoid duplicate starts
+        this._startPromise = null;
     }
 
     // -------------------------------------------------------------------------
@@ -40,7 +43,7 @@ class EdiromQrCodeScanner extends HTMLElement {
 
     connectedCallback() {
         console.log("Edirom QR Code Scanner connected!");
-        this._startScanner();
+        this.startScanner();
     }
 
     disconnectedCallback() {
@@ -84,85 +87,217 @@ class EdiromQrCodeScanner extends HTMLElement {
     }
 
     // -------------------------------------------------------------------------
+    // Public lifecycle API (host-controlled)
+    // -------------------------------------------------------------------------
+
+    getScannerState() {
+        if (!this._html5QrCode || typeof this._html5QrCode.getState !== "function") {
+            return null;
+        }
+        try {
+            return this._html5QrCode.getState();
+        } catch (_) {
+            return null;
+        }
+    }
+
+    isScannerReady() {
+        return !!this._html5QrCode;
+    }
+
+    isScannerRunning() {
+        return this._isScanningState(this.getScannerState());
+    }
+
+    async startScanner() {
+        if (this._startPromise) {
+            return this._startPromise;
+        }
+
+        const state = this.getScannerState();
+        if (this._isScanningState(state)) {
+            this._scanning = true;
+            return;
+        }
+
+        if (this._isPausedState(state)) {
+            this.resumeScanner();
+            return;
+        }
+
+        this._startPromise = this._startScannerInternal()
+            .finally(() => {
+                this._startPromise = null;
+            });
+
+        return this._startPromise;
+    }
+
+    pauseScanner(shouldPauseVideo = true) {
+        if (!this._html5QrCode) return false;
+
+        const state = this.getScannerState();
+        if (this._isPausedState(state)) {
+            this._scanning = false;
+            return true;
+        }
+
+        if (!this._isScanningState(state)) {
+            return false;
+        }
+
+        try {
+            this._html5QrCode.pause(shouldPauseVideo);
+            this._scanning = false;
+            return true;
+        } catch (err) {
+            console.error("EdiromQrCodeScanner: failed to pause scanner", err);
+            return false;
+        }
+    }
+
+    resumeScanner() {
+        if (!this._html5QrCode) return false;
+
+        const state = this.getScannerState();
+        if (this._isScanningState(state)) {
+            this._scanning = true;
+            return true;
+        }
+
+        if (!this._isPausedState(state)) {
+            return false;
+        }
+
+        try {
+            this._html5QrCode.resume();
+            this._scanning = true;
+            return true;
+        } catch (err) {
+            console.error("EdiromQrCodeScanner: failed to resume scanner", err);
+            return false;
+        }
+    }
+
+    async stopScanner() {
+        if (this._startPromise) {
+            try {
+                await this._startPromise;
+            } catch (_) {
+                // Start errors are handled where they occur.
+            }
+        }
+
+        this._scanning = false;
+
+        if (!this._html5QrCode) {
+            return;
+        }
+
+        const state = this.getScannerState();
+        if (!this._isScanningState(state) && !this._isPausedState(state)) {
+            return;
+        }
+
+        await this._html5QrCode.stop();
+    }
+
+    // -------------------------------------------------------------------------
     // Internal methods
     // -------------------------------------------------------------------------
 
-    _startScanner() {
+    async _startScannerInternal() {
         // Create and mount the reader div into light DOM so that
         // document.getElementById() — used internally by html5-qrcode — can
         // find it.
-        this._readerDiv = document.createElement("div");
-        this._readerDiv.id = `edirom-qr-reader-${this._uid}`;
-        this.appendChild(this._readerDiv);
+        if (!this._readerDiv) {
+            this._readerDiv = document.createElement("div");
+            this._readerDiv.id = `edirom-qr-reader-${this._uid}`;
+        }
+        if (!this._readerDiv.isConnected) {
+            this.appendChild(this._readerDiv);
+        }
 
-        this._html5QrCode = new Html5Qrcode(this._readerDiv.id);
+        if (!this._html5QrCode) {
+            this._html5QrCode = new Html5Qrcode(this._readerDiv.id);
+        }
 
-        Html5Qrcode.getCameras()
-            .then((devices) => {
-                let cameraId;
+        let cameraId;
+        const devices = await Html5Qrcode.getCameras();
 
-                if (devices && devices.length > 0) {
-                    // Prefer a back-facing camera; fall back to the first device
-                    const backCamera = devices.find((d) =>
-                        /back|rear|environment/i.test(d.label)
-                    );
-                    cameraId = backCamera ? backCamera.id : devices[0].id;
-                } else {
-                    // No enumerated devices — let the browser pick via facingMode
-                    cameraId = { facingMode: "environment" };
-                }
+        if (devices && devices.length > 0) {
+            // Prefer a back-facing camera; fall back to the first device
+            const backCamera = devices.find((d) =>
+                /back|rear|environment/i.test(d.label)
+            );
+            cameraId = backCamera ? backCamera.id : devices[0].id;
+        } else {
+            // No enumerated devices — let the browser pick via facingMode
+            cameraId = { facingMode: "environment" };
+        }
 
-                const videoConstraints = {
-                    width: 2000,
-                    height: 2000,
-                    frameRate: 30,
-                };
+        const videoConstraints = {
+            width: 20000,
+            height: 20000,
+            frameRate: 30,
+        };
 
-                // Apply the camera id: either a device id string or a
-                // facingMode constraint object (mirrors smartphone_client.js)
-                if (typeof cameraId === "object") {
-                    videoConstraints.facingMode = cameraId.facingMode;
-                } else {
-                    videoConstraints.deviceId = cameraId;
-                }
+        // Apply the camera id: either a device id string or a
+        // facingMode constraint object (mirrors smartphone_client.js)
+        if (typeof cameraId === "object") {
+            videoConstraints.facingMode = cameraId.facingMode;
+        } else {
+            videoConstraints.deviceId = cameraId;
+        }
 
-                return this._html5QrCode.start(
-                    cameraId,
-                    {
-                        fps: 30,
-                        aspectRatio: this.aspectRatio,
-                        videoConstraints: videoConstraints,
-                    },
-                    (decodedText) => {
-                        this._onCodeScanned(decodedText);
-                    },
-                    () => {
-                        // Frame-level scan errors are expected and can be ignored
-                    }
-                );
-            })
-            .then(() => {
-                this._scanning = true;
-            })
-            .catch((err) => {
-                console.error("EdiromQrCodeScanner: failed to start scanner", err);
-            });
+        await this._html5QrCode.start(
+            cameraId,
+            {
+                fps: 30,
+                aspectRatio: this.aspectRatio,
+                qrbox: 150,
+                videoConstraints: videoConstraints,
+            },
+            (decodedText) => {
+                this._onCodeScanned(decodedText);
+            },
+            () => {
+                // Frame-level scan errors are expected and can be ignored
+            }
+        );
+
+        this._scanning = true;
     }
 
-    _cleanup() {
-        this._scanning = false;
-
-        if (this._html5QrCode) {
-            const qr = this._html5QrCode;
-            this._html5QrCode = null;
-            // Best-effort async stop — we don't await this
-            qr.stop().catch(() => { });
+    async _cleanup() {
+        try {
+            await this.stopScanner();
+        } catch (_) {
+            // Best effort cleanup during disconnect.
         }
+
+        this._scanning = false;
+        this._html5QrCode = null;
+        this._startPromise = null;
 
         if (this._readerDiv) {
             this._readerDiv.remove();
             this._readerDiv = null;
         }
+    }
+
+    _isScanningState(state) {
+        const scanning = typeof Html5QrcodeScannerState !== "undefined"
+            ? Html5QrcodeScannerState.SCANNING
+            : 2;
+        return state === scanning;
+    }
+
+    _isPausedState(state) {
+        const paused = typeof Html5QrcodeScannerState !== "undefined"
+            ? Html5QrcodeScannerState.PAUSED
+            : 3;
+        return state === paused;
     }
 
     _onCodeScanned(decodedText) {
