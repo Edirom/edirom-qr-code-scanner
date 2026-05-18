@@ -2,13 +2,7 @@ console.log("Edirom QR Code Scanner Web Component loaded");
 
 // Note: This component intentionally does NOT use Shadow DOM.
 //
-// The html5-qrcode library locates its camera feed mount point via
-// document.getElementById(). That API cannot cross a Shadow Root boundary —
-// elements inside a shadow tree are invisible to document.getElementById(),
-// even if their id is unique in the document. Attaching a shadow root would
-// therefore silently break the library's internal DOM lookup.
-//
-// Since this component has no CSS of its own that needs encapsulation, Shadow
+// This component has no CSS of its own that needs encapsulation, so Shadow
 // DOM provides no benefit here. The reader <div> is appended directly into the
 // component's light DOM via this.appendChild().
 
@@ -207,19 +201,17 @@ class EdiromQrCodeScanner extends HTMLElement {
     // -------------------------------------------------------------------------
 
     async _startScannerInternal() {
-        // Create and mount the reader div into light DOM so that
-        // document.getElementById() — used internally by html5-qrcode — can
-        // find it.
+        // Create and mount the reader div into light DOM.
+        // The element reference is passed directly to Html5Qrcode (no ID lookup needed).
         if (!this._readerDiv) {
             this._readerDiv = document.createElement("div");
-            this._readerDiv.id = `edirom-qr-reader-${this._uid}`;
         }
         if (!this._readerDiv.isConnected) {
             this.appendChild(this._readerDiv);
         }
 
         if (!this._html5QrCode) {
-            this._html5QrCode = new Html5Qrcode(this._readerDiv.id);
+            this._html5QrCode = new Html5Qrcode(this._readerDiv);
         }
 
         let cameraId;
