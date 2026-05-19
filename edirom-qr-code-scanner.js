@@ -175,11 +175,18 @@ class EdiromQrCodeScanner extends HTMLElement {
 
     async stopScanner() {
         if (this._startPromise) {
+            // An init is in progress. Abort it immediately by force-resetting
+            // (nulls _html5QrCode so _startScannerInternal exits at its guard
+            // check), then wait for the promise to settle. This avoids ever
+            // calling html5-qrcode's stop() on a partially-initialized instance.
+            const pending = this._startPromise;
+            this._forceReset();
             try {
-                await this._startPromise;
+                await pending;
             } catch (_) {
-                // Start errors are handled where they occur.
+                // Expected — start was aborted mid-flight.
             }
+            return;
         }
 
         this._scanning = false;
@@ -193,7 +200,34 @@ class EdiromQrCodeScanner extends HTMLElement {
             return;
         }
 
-        await this._html5QrCode.stop();
+        try {
+            await this._html5QrCode.stop();
+        } catch (err) {
+            // html5-qrcode can throw when stopped during initialisation
+            // (e.g. "Cannot transition to a new state"). Force a clean reset
+            // so the component is restartable on next use.
+            this._forceReset();
+            throw err;
+        }
+    }
+
+    /**
+     * Unconditionally tears down the html5-qrcode instance and the reader div,
+     * leaving the component in a clean, restartable state. Use this as an
+     * escape hatch when the library enters an unrecoverable transition state.
+     */
+    _forceReset() {
+        this._scanning = false;
+        this._startPromise = null;
+        this._html5QrCode = null;
+        if (this._readerDiv) {
+            try {
+                this._readerDiv.remove();
+            } catch (_) {
+                // Best-effort removal; the node may already be detached.
+            }
+            this._readerDiv = null;
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -216,6 +250,13 @@ class EdiromQrCodeScanner extends HTMLElement {
 
         let cameraId;
         const devices = await Html5Qrcode.getCameras();
+
+        // Guard: _forceReset() may have been called while getCameras() was
+        // awaiting (e.g. the user closed the popover). Exit cleanly so that
+        // html5-qrcode APIs are never called on a torn-down instance.
+        if (!this._html5QrCode) {
+            return;
+        }
 
         if (devices && devices.length > 0) {
             // Prefer a back-facing camera; fall back to the first device
