@@ -1,155 +1,69 @@
-# Edirom QR Code Scanner Web Component
+# Edirom QR Code Scanner
 
-## Overview
+Web Component that renders a live camera feed and continuously scans for QR codes. Dispatches a `qr-code-scanned` event with the decoded text when a matching code is detected. Does not use Shadow DOM.
 
-The `edirom-qr-code-scanner` is a Web Component that renders a live camera feed and continuously scans for QR codes. When a QR code is detected, it fires a `qr-code-scanned` custom event carrying the decoded text.
-
-The scanner starts automatically when the component is connected to the DOM and stops cleanly when it is removed. An optional `regex` attribute lets the host application filter which scanned values trigger an event.
-
-## Features
-
-- **Automatic lifecycle management**: Camera feed starts on `connectedCallback` and stops on `disconnectedCallback`. No manual setup or teardown needed.
-- **Continuous scanning**: The scanner keeps running after each successful scan. Remove the element from the DOM to stop it.
-- **Regex filtering**: If the `regex` attribute is set, only scanned values matching the pattern dispatch an event. Invalid regex patterns are silently ignored.
-- **Event-driven**: Integrates with any host application through a single custom event — no shared state or direct method calls required.
-- **Back camera preference**: Automatically selects a back-facing / environment camera if available, falling back to the first available device.
-
-## Endpoints (Attributes and Properties)
-
-### `regex` (Attribute / Property)
-
-An optional regular expression string. When set, the component tests every scanned value against the pattern. The `qr-code-scanned` event is dispatched only if the value matches. If the attribute is absent, every successfully decoded QR code fires the event.
-
-|              |                                       |
-| ------------ | ------------------------------------- |
-| **Type**     | `string` (regular expression pattern) |
-| **Required** | No                                    |
-| **Default**  | _(absent — all scanned values pass)_  |
-
-**Examples:**
+## Usage
 
 ```html
-<!-- Fire for any QR code -->
-<edirom-qr-code-scanner></edirom-qr-code-scanner>
+<script src="resources/webcomponents/edirom-qr-code-scanner/edirom-qr-code-scanner.js"></script>
 
-<!-- Fire only for HTTPS URLs -->
-<edirom-qr-code-scanner regex="^https://"></edirom-qr-code-scanner>
-
-<!-- Fire only for codes matching a fixed prefix -->
-<edirom-qr-code-scanner regex="^edirom-session-"></edirom-qr-code-scanner>
+<edirom-qr-code-scanner
+  regex="^edirom://"
+  aspect-ratio="1"
+></edirom-qr-code-scanner>
 ```
 
-Setting the property in JavaScript:
-
-```javascript
+```js
 const scanner = document.querySelector("edirom-qr-code-scanner");
 
-// Set regex filter
-scanner.regex = "^https://";
+scanner.addEventListener("qr-code-scanned", (e) => {
+  console.log("Scanned:", e.detail.text);
+});
 
-// Remove filter (any value will fire the event again)
-scanner.regex = null;
+// Host-controlled lifecycle
+await scanner.startScanner();
+scanner.pauseScanner();        // pause scanning (keep camera)
+scanner.resumeScanner();       // resume
+await scanner.stopScanner();   // fully stop
 ```
 
----
+## Attributes
+
+| Attribute | Type | Default | Description |
+|---|---|---|---|
+| `regex` | string | — | Regex pattern. Only matching scans dispatch events. Invalid patterns are silently ignored. Changes take effect immediately — no restart needed. |
+| `aspect-ratio` | number | `0.75` | Camera feed aspect ratio (height / width). `0.75` = 3:4 portrait. |
+
+## Properties
+
+| Property | Type | Description |
+|---|---|---|
+| `regex` | `string` \| `null` | Get/set the regex filter. Set to `null` to clear. |
+| `aspectRatio` | `number` | Get/set the aspect ratio. |
 
 ## Events
 
-### `qr-code-scanned`
+| Event | Detail | Description |
+|---|---|---|
+| `qr-code-scanned` | `{ text: string }` | Fired when a QR code is decoded and passes the `regex` filter. Bubbles, crosses shadow boundaries. |
 
-Fired when a QR code is successfully decoded and its value passes the `regex` filter (or when no `regex` attribute is set).
+## Methods
 
-The event bubbles and crosses Shadow DOM boundaries (`composed: true`), so it can be caught on any ancestor element.
-
-**Event detail:**
-
-```javascript
-{
-  text: string; // The decoded text content of the scanned QR code
-}
-```
-
-**Example:**
-
-```javascript
-document
-  .querySelector("edirom-qr-code-scanner")
-  .addEventListener("qr-code-scanned", (e) => {
-    console.log("Scanned:", e.detail.text);
-  });
-```
-
----
+| Method | Returns | Description |
+|---|---|---|
+| `startScanner()` | `Promise<void>` | Start or resume the scanner. Safe to call multiple times — no-ops if already running. |
+| `pauseScanner(shouldPauseVideo?)` | `boolean` | Pause scanning. Pass `true` to also freeze the camera feed. Returns whether the pause succeeded. |
+| `resumeScanner()` | `boolean` | Resume a paused scanner. Returns whether the resume succeeded. |
+| `stopScanner()` | `Promise<void>` | Fully stop and clean up. Restartable via `startScanner()`. |
+| `getScannerState()` | `number` \| `null` | Raw html5-qrcode state value (`SCANNING` = 2, `PAUSED` = 3). `null` if no instance exists. |
+| `isScannerReady()` | `boolean` | Whether the html5-qrcode instance has been created. |
+| `isScannerRunning()` | `boolean` | Whether the camera is actively scanning. |
 
 ## Dependencies
 
 ### `html5-qrcode`
 
-This component relies on a **locally modified** version of the `html5-qrcode` library for camera access and QR code decoding. The library must be loaded and available in the **global scope** (`window.Html5Qrcode`) **before** the component script is loaded.
+The component depends on a **locally modified** version of [html5-qrcode](https://github.com/mebjas/html5-qrcode). The library is **loaded automatically** on first use — no manual `<script>` tag needed. The component resolves the library relative to its own script URL (`resources/html5-qrcode.min.js`) and injects it into the document `<head>`. If `window.Html5Qrcode` is already present (e.g. the host preloaded it), injection is skipped.
 
-```html
-<!-- 1. Load the library first -->
-<script src="resources/js/html5-qrcode.min.js"></script>
+The local copy extends the `Html5Qrcode` constructor to accept an `HTMLElement` directly (upstream only accepts element ID strings). Passing a string ID still works as before. This allows the scanner's reader `<div>` to reside anywhere in the DOM — including inside a shadow root.
 
-<!-- 2. Then load the component -->
-<script src="resources/webcomponents/edirom-qr-code-scanner/edirom-qr-code-scanner.js"></script>
-```
-
-The component does **not** bundle or import the library itself.
-
-#### Local modifications to `html5-qrcode`
-
-The upstream `Html5Qrcode` constructor only accepts an element ID string and resolves the DOM element via `document.getElementById()`. That API cannot cross a Shadow DOM boundary, which would prevent the scanner's mount point from living inside a shadow root.
-
-The local copy (source in `Web-Components/html5-qrcode/src/html5-qrcode.ts`, built bundle at `minified/html5-qrcode.min.js`) extends the constructor to also accept an `HTMLElement` directly:
-
-```typescript
-// Upstream (string only):
-new Html5Qrcode("my-reader-div-id");
-
-// Extended (element reference also accepted):
-new Html5Qrcode(document.getElementById("my-reader-div-id"));
-new Html5Qrcode(someElementInsideShadowRoot);
-```
-
-When an element is passed directly, all internal `document.getElementById()` lookups are skipped — the element reference is used throughout. Passing a string ID still works exactly as before (backward compatible).
-
-This modification allows `edirom-qr-code-scanner` to pass its internal reader `<div>` by reference rather than by ID, so the mount point can reside anywhere in the DOM — including inside a shadow root.
-
-> **Note on Shadow DOM**: This component intentionally does not use Shadow DOM, as it has no styles to encapsulate. The reader `<div>` is appended directly to the component's light DOM via `this.appendChild()`.
-
----
-
-## Usage Example
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <script src="resources/js/html5-qrcode.min.js"></script>
-    <script src="resources/webcomponents/edirom-qr-code-scanner/edirom-qr-code-scanner.js"></script>
-    <style>
-      #scanner-container {
-        width: 100%;
-        max-width: 400px;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="scanner-container">
-      <edirom-qr-code-scanner regex="^https://"></edirom-qr-code-scanner>
-    </div>
-
-    <script>
-      document
-        .querySelector("edirom-qr-code-scanner")
-        .addEventListener("qr-code-scanned", (e) => {
-          console.log("Scanned URL:", e.detail.text);
-
-          // Stop scanning by removing the component from the DOM
-          document.querySelector("edirom-qr-code-scanner").remove();
-        });
-    </script>
-  </body>
-</html>
-```
