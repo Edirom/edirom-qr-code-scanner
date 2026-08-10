@@ -6,7 +6,27 @@ console.log("Edirom QR Code Scanner Web Component loaded");
 // DOM provides no benefit here. The reader <div> is appended directly into the
 // component's light DOM via this.appendChild().
 
+// Resolve the component's own script URL at definition time, so we can
+// locate the html5-qrcode library relative to ourselves even when the
+// component is deployed at an unknown path.
+const _COMPONENT_BASE = (() => {
+    // Classic <script> tag
+    if (document.currentScript) {
+        return new URL('.', document.currentScript.src).href;
+    }
+    // ES module (imported or loaded with type="module")
+    try {
+        if (import.meta.url) {
+            return new URL('.', import.meta.url).href;
+        }
+    } catch (_) { }
+    return '';
+})();
+
 class EdiromQrCodeScanner extends HTMLElement {
+
+    // Shared across all instances: tracks a single in-flight library load.
+    static _libraryLoadPromise = null;
 
     constructor() {
         super();
@@ -234,7 +254,55 @@ class EdiromQrCodeScanner extends HTMLElement {
     // Internal methods
     // -------------------------------------------------------------------------
 
+    async _ensureLibrary() {
+        // Already available — either host loaded it or a previous instance did.
+        if (window.Html5Qrcode) return;
+
+        // Another instance is already injecting the script — wait for it.
+        if (this.constructor._libraryLoadPromise) {
+            return this.constructor._libraryLoadPromise;
+        }
+
+        if (!_COMPONENT_BASE) {
+            throw new Error(
+                'Cannot determine component location to load html5-qrcode. ' +
+                'Preload the library with a <script> tag before this component.'
+            );
+        }
+
+        const scriptSrc = new URL('resources/html5-qrcode.min.js', _COMPONENT_BASE).href;
+
+        this.constructor._libraryLoadPromise = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = scriptSrc;
+            script.onload = () => {
+                if (window.Html5Qrcode) {
+                    resolve();
+                } else {
+                    reject(new Error(
+                        'html5-qrcode script loaded but window.Html5Qrcode is not set. ' +
+                        'The library may not be the expected build.'
+                    ));
+                }
+            };
+            script.onerror = () => {
+                reject(new Error(`Failed to load html5-qrcode from: ${scriptSrc}`));
+            };
+            document.head.appendChild(script);
+        });
+
+        try {
+            await this.constructor._libraryLoadPromise;
+        } finally {
+            // Clear so a failed load can be retried (e.g. host fixes the path).
+            this.constructor._libraryLoadPromise = null;
+        }
+    }
+
     async _startScannerInternal() {
+        // Ensure the html5-qrcode library is loaded before we use it.
+        await this._ensureLibrary();
+
         // Create and mount the reader div into light DOM.
         // The element reference is passed directly to Html5Qrcode (no ID lookup needed).
         if (!this._readerDiv) {
