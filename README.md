@@ -31,7 +31,7 @@ await scanner.stopScanner();   // fully stop
 
 | Attribute | Type | Default | Description |
 |---|---|---|---|
-| `regex` | string | — | Regex pattern. Only matching scans dispatch events; without it every scan does. An **invalid** pattern logs a warning and disables the scanner (it stops and does not start) until the pattern is valid or removed. Changes take effect immediately. |
+| `regex` | string | — | Regex pattern. Only matching scans dispatch events (plus those the `alsoAccept` function takes, see below); without it every scan does. An **invalid** pattern logs a warning and disables the scanner (it stops and does not start) until the pattern is valid or removed. Changes take effect immediately. |
 | `aspect-ratio` | number | `0.75` | Camera feed aspect ratio (height / width). `0.75` = 3:4 portrait. |
 
 ## Properties
@@ -39,13 +39,14 @@ await scanner.stopScanner();   // fully stop
 | Property | Type | Description |
 |---|---|---|
 | `regex` | `string` \| `null` | Get/set the regex filter. Set to `null` to clear. |
+| `alsoAccept` | `(text: string) => boolean` \| `null` | A function that accepts codes the `regex` rejects, so a host can let through what it can handle itself without the pattern having to describe it. It is only asked about codes the `regex` does not match, and never overrides an invalid `regex`. A function that throws counts as "no". `null` removes it. Property only (a function cannot be an attribute). |
 | `aspectRatio` | `number` | Get/set the aspect ratio. |
 
 ## Events
 
 | Event | Detail | Description |
 |---|---|---|
-| `qr-code-scanned` | `{ text: string }` | Fired when a QR code is decoded and passes the `regex` filter. Bubbles, crosses shadow boundaries. |
+| `qr-code-scanned` | `{ text: string }` | Fired when a QR code is decoded and passes the `regex` filter or `alsoAccept`. Bubbles, crosses shadow boundaries. |
 
 ## Methods
 

@@ -50,6 +50,9 @@ class EdiromQrCodeScanner extends HTMLElement {
         // (see _updateRegex): `_regexInvalid` is true and nothing is started or dispatched.
         this._regex = null;
         this._regexInvalid = false;
+
+        // The `alsoAccept` predicate, or null (see the property)
+        this._alsoAccept = null;
     }
 
     // -------------------------------------------------------------------------
@@ -122,6 +125,22 @@ class EdiromQrCodeScanner extends HTMLElement {
         } else {
             this.removeAttribute("regex");
         }
+    }
+
+    /**
+     * A function the host can set to accept codes that the `regex` does not match: `(text: string) => boolean`.
+     * A code is dispatched if it matches the `regex` or this function returns true for it, so the host can let
+     * through what it can handle by itself (for example its own links) without the pattern having to describe it.
+     * It is only asked about codes the `regex` rejects, and never overrides an invalid `regex`. A function that
+     * throws counts as "no". Set it to `null` to remove it. It is a property only, as a function cannot be an attribute.
+     * @type {((text: string) => boolean)|null}
+     */
+    get alsoAccept() {
+        return this._alsoAccept;
+    }
+
+    set alsoAccept(fn) {
+        this._alsoAccept = typeof fn === "function" ? fn : null;
     }
 
     get aspectRatio() {
@@ -443,9 +462,27 @@ class EdiromQrCodeScanner extends HTMLElement {
         return state === paused;
     }
 
+    /**
+     * Whether a scanned code is passed on: there is no `regex`, it matches, or `alsoAccept` takes it. Nothing is
+     * accepted while the `regex` is invalid.
+     * @param {string} decodedText
+     * @returns {boolean}
+     */
+    _isAccepted(decodedText) {
+        if (this._regexInvalid) return false;
+        if (this._regex === null || this._regex.test(decodedText)) return true;
+        if (this._alsoAccept === null) return false;
+        try {
+            return this._alsoAccept(decodedText) === true;
+        } catch (error) {
+            console.warn("Edirom QR Code Scanner: the alsoAccept function failed, the code is not accepted.", error);
+            return false;
+        }
+    }
+
     _onCodeScanned(decodedText) {
-        // Disabled by an invalid regex, or the text does not match: suppress the event
-        if (this._regexInvalid || (this._regex !== null && !this._regex.test(decodedText))) {
+        // Disabled by an invalid regex, or not accepted: suppress the event
+        if (!this._isAccepted(decodedText)) {
             return;
         }
 
