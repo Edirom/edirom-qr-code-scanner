@@ -45,6 +45,11 @@ class EdiromQrCodeScanner extends HTMLElement {
 
         // Promise for an in-flight start operation to avoid duplicate starts
         this._startPromise = null;
+
+        // The compiled `regex` attribute, or null if there is none. An invalid pattern disables the scanner
+        // (see _updateRegex): `_regexInvalid` is true and nothing is started or dispatched.
+        this._regex = null;
+        this._regexInvalid = false;
     }
 
     // -------------------------------------------------------------------------
@@ -67,8 +72,40 @@ class EdiromQrCodeScanner extends HTMLElement {
 
     attributeChangedCallback(name, oldValue, newValue) {
         if (oldValue === newValue) return;
-        // No restart required — _onCodeScanned reads the regex attribute fresh
-        // on every invocation, so live changes take effect immediately.
+        if (name === "regex") {
+            this._updateRegex();
+        }
+    }
+
+    /**
+     * Compiles the `regex` attribute once, so a live change takes effect on the next scan. An invalid pattern
+     * logs a warning and disables the scanner: it is stopped and not started again until the pattern is valid
+     * (or removed), because filtering with a pattern that cannot be applied would accept or reject everything.
+     */
+    _updateRegex() {
+        const wasInvalid = this._regexInvalid;
+        const pattern = this.getAttribute("regex");
+        this._regex = null;
+        this._regexInvalid = false;
+
+        if (pattern !== null) {
+            try {
+                this._regex = new RegExp(pattern);
+            } catch (error) {
+                this._regexInvalid = true;
+                console.warn(`Edirom QR Code Scanner: invalid regex "${pattern}", the scanner is disabled.`, error);
+            }
+        }
+
+        if (this._regexInvalid) {
+            this.stopScanner().catch((err) => {
+                console.error("EdiromQrCodeScanner: failed to stop the scanner for an invalid regex", err);
+            });
+        } else if (wasInvalid && this.isConnected) {
+            this.startScanner().catch((err) => {
+                console.error("EdiromQrCodeScanner: failed to restart the scanner", err);
+            });
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -124,6 +161,11 @@ class EdiromQrCodeScanner extends HTMLElement {
     }
 
     async startScanner() {
+        // Disabled by an invalid regex (see _updateRegex)
+        if (this._regexInvalid) {
+            return;
+        }
+
         if (this._startPromise) {
             return this._startPromise;
         }
@@ -171,7 +213,7 @@ class EdiromQrCodeScanner extends HTMLElement {
     }
 
     resumeScanner() {
-        if (!this._html5QrCode) return false;
+        if (!this._html5QrCode || this._regexInvalid) return false;
 
         const state = this.getScannerState();
         if (this._isScanningState(state)) {
@@ -402,18 +444,9 @@ class EdiromQrCodeScanner extends HTMLElement {
     }
 
     _onCodeScanned(decodedText) {
-        const regexAttr = this.getAttribute("regex");
-
-        if (regexAttr !== null) {
-            try {
-                const pattern = new RegExp(regexAttr);
-                if (!pattern.test(decodedText)) {
-                    return; // Does not match — suppress the event
-                }
-            } catch (e) {
-                // Invalid regex in attribute — silently ignore, suppress event
-                return;
-            }
+        // Disabled by an invalid regex, or the text does not match: suppress the event
+        if (this._regexInvalid || (this._regex !== null && !this._regex.test(decodedText))) {
+            return;
         }
 
         this.dispatchEvent(

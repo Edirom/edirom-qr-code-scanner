@@ -8,7 +8,7 @@ Web Component that renders a live camera feed and continuously scans for QR code
 <script src="resources/webcomponents/edirom-qr-code-scanner/edirom-qr-code-scanner.js"></script>
 
 <edirom-qr-code-scanner
-  regex="^edirom://"
+  regex="^https://qr\.example\.com/"
   aspect-ratio="1"
 ></edirom-qr-code-scanner>
 ```
@@ -31,7 +31,7 @@ await scanner.stopScanner();   // fully stop
 
 | Attribute | Type | Default | Description |
 |---|---|---|---|
-| `regex` | string | — | Regex pattern. Only matching scans dispatch events. Invalid patterns are silently ignored. Changes take effect immediately — no restart needed. |
+| `regex` | string | — | Regex pattern. Only matching scans dispatch events; without it every scan does. An **invalid** pattern logs a warning and disables the scanner (it stops and does not start) until the pattern is valid or removed. Changes take effect immediately. |
 | `aspect-ratio` | number | `0.75` | Camera feed aspect ratio (height / width). `0.75` = 3:4 portrait. |
 
 ## Properties
